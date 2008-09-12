@@ -11,7 +11,7 @@ module MerbThorHelper
   private
     
   def working_dir
-    @_working_dir ||= File.expand_path(options['merb-root'] || Dir.pwd)
+    Merb.working_dir
   end
   
   def source_dir
@@ -21,14 +21,17 @@ module MerbThorHelper
   end
   
   def gem_dir
-    File.directory?(working_dir) ? File.join(working_dir, 'gems') : nil
+   @_gem_dir = File.directory?(working_dir) ? File.join(working_dir, 'gems') : nil
+   create_if_missing(@_gem_dir)
+   @_gem_dir
   end
   
   def create_if_missing(path)
-    FileUtils.mkdir(path) unless File.exists?(path)
+    FileUtils.mkdir(path) unless (path.nil? || File.exists?(path))
   end
   
 end
+
 
 class Merb < Thor
   
@@ -45,42 +48,32 @@ class Merb < Thor
   class GemUninstallError < Exception
   end
 
-  desc 'edge', 'Install extlib, merb-core and merb-more from git HEAD'
-  method_options "--merb-root" => :optional
+  desc 'edge', 'Install extlib, merb-core and merb-more from git HEAD, pass an optional component name to only install this one'
+  method_options "--merb-root" => :optional, "--component" => :optional
   def edge
-    p "not implemented yet"
+     component = options[:component]
+     git_tool = Merb::Source.new
+     unless component
+       %W{merb-core merb-more merb-plugins extlib}.each do |component|
+         puts "fetching #{component}"
+         git_tool.clone(Merb.repos[component], options)
+         git_tool.install(component, options)
+       end
+     else
+        puts "fetching #{component}"
+        git_tool.clone(Merb.repos[component], options)
+        git_tool.install(component, options)
+     end
   end
   
-  class Edge < Thor
-    
-    include MerbThorHelper
-    
-    desc 'core', 'Install extlib and merb-core from git HEAD'
-    method_options "--merb-root" => :optional
-    def core
-      p "not implemented yet"
-    end
-    
-    desc 'more', 'Install merb-more from git HEAD'
-    method_options "--merb-root" => :optional
-    def more
-      p "not implemented yet"
-    end
-    
-    desc 'plugins', 'Install merb-plugins from git HEAD'
-    method_options "--merb-root" => :optional
-    def plugins
-      p "not implemented yet"
-    end
-    
-  end
     
   class Source < Thor
     
     include MerbThorHelper
     
     desc 'clone REPOSITORY_URL', 'Clone a git repository into ./src'
-    def clone(repository_url)
+    def clone(repository_url, options={})
+      Merb.set_working_dir(options["merb-root"])
       repository_name = repository_url[/([\w+|-]+)\.git/u, 1]
       local_repo_path =  "#{source_dir}/#{repository_name}"
       
@@ -153,7 +146,8 @@ class Merb < Thor
     
     desc 'install GEM_NAME', 'Install a rubygem from (git) source'
     method_options "--merb-root" => :optional
-    def install(name)
+    def install(name, options={})
+      Merb.set_working_dir(options["merb-root"])
       puts "Installing #{name}..."
       gem_src_dir = File.join(source_dir, name)
       Merb.install_gem_from_src(gem_src_dir, gem_dir)
@@ -343,6 +337,16 @@ class Merb < Thor
         'dm-more'       => "git://github.com/sam/dm-more.git"
       }
     end
+    
+    # Have to be set for every task requiring the working dir otherwise task dependent on others break
+    def set_working_dir(path=nil)
+      @@working_dir ||= File.expand_path(path || Dir.pwd)
+    end
+    
+    def working_dir
+      @@working_dir
+    end
+    
     
     # Install a gem - looks remotely and locally;
     # won't process rdoc or ri options.
